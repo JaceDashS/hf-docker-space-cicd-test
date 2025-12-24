@@ -31,10 +31,8 @@ jobs:
           huggingface-cli login --token $HF_TOKEN
       
       - name: Clone Space repository
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git clone https://huggingface_user:$HF_TOKEN@huggingface.co/spaces/JaceDashS/test space-repo
+          git clone https://huggingface.co/spaces/JaceDashS/test space-repo
       
       - name: Copy files to Space repository
         run: |
@@ -42,21 +40,13 @@ jobs:
           cp Dockerfile space-repo/
           cp .dockerignore space-repo/ 2>/dev/null || true
           cp README.md space-repo/ 2>/dev/null || true
-          ls -la space-repo/
       
       - name: Commit and push to Space
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         working-directory: ./space-repo
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git remote set-url origin https://huggingface_user:$HF_TOKEN@huggingface.co/spaces/JaceDashS/test
           git add .
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Deploy from GitHub Actions [skip ci]"
-            git push origin main || git push origin master
-          fi
+          git diff --staged --quiet || git commit -m "Deploy from GitHub Actions [skip ci]"
+          git push
 
