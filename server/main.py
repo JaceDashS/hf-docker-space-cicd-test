@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     # unbuffered 출력을 위해 sys.stdout.flush() 사용
     print(f"\n{'='*60}", flush=True)
     print("Health Check Server Started", flush=True)
-    print(f"Version: 1.0.2", flush=True)
+    print(f"Version: 1.0.3", flush=True)
     print(f"Host: {host}", flush=True)
     print(f"Port: {port}", flush=True)
     print(f"Health Check: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/health", flush=True)
@@ -92,7 +92,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "Health Check Server",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "model": model_status,
         "sample": {
             "question": sample_question if model is not None else None,
