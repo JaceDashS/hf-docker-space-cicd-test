@@ -12,56 +12,30 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      
-      - name: Install Hugging Face CLI
+      - name: Prepare deployment bundle
         run: |
-          pip install huggingface_hub[cli]
+          mkdir -p out
+          cp server.py out/
+          cp Dockerfile out/
+          cp README.md out/
+          cp .dockerignore out/ 2>/dev/null || true
+          ls -la out/
       
-      - name: Login to Hugging Face
+      - name: Push to Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          huggingface-cli login --token $HF_TOKEN
-      
-      - name: Configure Git credentials
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          git config --global credential.helper store
-          echo "https://huggingface_user:${HF_TOKEN}@huggingface.co" > ~/.git-credentials
-      
-      - name: Clone Space repository
-        run: |
-          git clone https://huggingface.co/spaces/JaceDashS/test space-repo
-      
-      - name: Copy files to Space repository
-        run: |
-          cp server.py space-repo/
-          cp Dockerfile space-repo/
-          cp .dockerignore space-repo/ 2>/dev/null || true
-          cp README.md space-repo/ 2>/dev/null || true
-          ls -la space-repo/
-      
-      - name: Commit and push to Space
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        working-directory: ./space-repo
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git remote set-url origin https://huggingface_user:${HF_TOKEN}@huggingface.co/spaces/JaceDashS/test
+          cd out
+          git init
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          
           git add .
-          if ! git diff --staged --quiet; then
-            git commit -m "Deploy from GitHub Actions [skip ci]"
-            git push origin main || git push origin master || git push
-          else
-            echo "No changes to commit"
-          fi
+          git commit -m "Deploy from GitHub Actions [skip ci]" || true
+          
+          git branch -M main
+          git push https://JaceDashS:${HF_TOKEN}@huggingface.co/spaces/JaceDashS/test main --force
 
