@@ -130,3 +130,5 @@ def generate_text(prompt: str, max_length: int = 50):
         }
     except Exception as e:
         return {"error": str(e)}
+
+#임시 주석
