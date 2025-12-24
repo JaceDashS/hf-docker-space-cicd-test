@@ -1,0 +1,33 @@
+{
+  "name": "hf-docker-space-cicd-test",
+  "version": "1.0.0",
+  "description": "허깅페이스 Docker Spaces 배포 테스트 프로젝트",
+  "scripts": {
+    "start": "python server.py",
+    "dev": "python server.py",
+    "server": "python server.py",
+    "docker:build": "docker build -t health-check-server .",
+    "docker:build:no-cache": "docker build --no-cache -t health-check-server .",
+    "docker:run": "docker run -p 7860:7860 --name health-check-server health-check-server",
+    "docker:build:run": "npm run docker:stop || true && npm run docker:build && npm run docker:run",
+    "docker:stop": "docker stop health-check-server && docker rm health-check-server",
+    "docker:logs": "docker logs -f health-check-server",
+    "docker:clean": "docker rmi health-check-server",
+    "test": "curl http://localhost:7860/health || echo 'Server is not running. Run npm start first.'",
+    "health": "curl -s http://localhost:7860/health | python -m json.tool || echo 'Server is not running. Run npm start first.'",
+    "deploy:info": "echo 'Deploy to Hugging Face Spaces via GitHub Actions or manually push to HF Space repo'"
+  },
+  "keywords": [
+    "huggingface",
+    "spaces",
+    "docker",
+    "health-check",
+    "python"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
+

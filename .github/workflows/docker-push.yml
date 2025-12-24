@@ -1,0 +1,53 @@
+name: Deploy to Hugging Face Spaces
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Hugging Face CLI
+        run: |
+          pip install huggingface_hub[cli]
+      
+      - name: Login to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          huggingface-cli login --token $HF_TOKEN
+      
+      - name: Clone Space repository
+        run: |
+          git clone https://huggingface.co/spaces/JaceDashS/test space-repo
+      
+      - name: Copy files to Space repository
+        run: |
+          cp server.py space-repo/
+          cp Dockerfile space-repo/
+          cp .dockerignore space-repo/ 2>/dev/null || true
+          # README.md는 허깅페이스 Spaces 형식으로 복사
+          cp README.md space-repo/ 2>/dev/null || true
+      
+      - name: Commit and push to Space
+        working-directory: ./space-repo
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add .
+          git diff --staged --quiet || git commit -m "Deploy from GitHub Actions [skip ci]"
+          git push
+
