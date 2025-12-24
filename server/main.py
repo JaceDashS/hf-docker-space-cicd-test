@@ -78,6 +78,7 @@ def main():
     
     print(f"\n{'='*60}")
     print("Health Check Server Started")
+    print(f"Version: 1.0.1")
     print(f"Host: {host}")
     print(f"Port: {port}")
     print(f"Health Check: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/health")
