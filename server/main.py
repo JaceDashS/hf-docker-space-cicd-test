@@ -16,20 +16,18 @@ async def lifespan(app: FastAPI):
     host = os.getenv('HOST', '0.0.0.0')
     
     # unbuffered 출력을 위해 sys.stdout.flush() 사용
-    sys.stdout.write(f"\n{'='*60}\n")
-    sys.stdout.write("Health Check Server Started\n")
-    sys.stdout.write(f"Version: 1.0.2\n")
-    sys.stdout.write(f"Host: {host}\n")
-    sys.stdout.write(f"Port: {port}\n")
-    sys.stdout.write(f"Health Check: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/health\n")
-    sys.stdout.write(f"{'='*60}\n\n")
-    sys.stdout.flush()
+    print(f"\n{'='*60}", flush=True)
+    print("Health Check Server Started", flush=True)
+    print(f"Version: 1.0.2", flush=True)
+    print(f"Host: {host}", flush=True)
+    print(f"Port: {port}", flush=True)
+    print(f"Health Check: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/health", flush=True)
+    print(f"{'='*60}\n", flush=True)
     
     yield
     
     # Shutdown (필요시 추가)
-    # sys.stdout.write("Shutting down server...\n")
-    # sys.stdout.flush()
+    # print("Shutting down server...", flush=True)
 
 
 app = FastAPI(lifespan=lifespan)
