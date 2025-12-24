@@ -37,7 +37,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         response = {
             "status": "healthy",
             "service": "Health Check Server",
-            "version": "1.0.0"
+            "version": "1.0.1"
         }
         self._send_json_response(200, response)
     

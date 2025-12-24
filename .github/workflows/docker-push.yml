@@ -18,10 +18,11 @@ jobs:
       - name: Prepare deployment bundle
         run: |
           mkdir -p out
-          cp server.py out/
-          cp Dockerfile out/
-          cp README.md out/
-          cp .dockerignore out/ 2>/dev/null || true
+          cp server/main.py out/
+          cp server/Dockerfile out/
+          # hf_config.md의 내용을 README.md로 복사 (허깅페이스 Spaces용)
+          cp server/hf_config.md out/README.md
+          cp server/.dockerignore out/ 2>/dev/null || true
           ls -la out/
       
       - name: Push to Hugging Face Space
