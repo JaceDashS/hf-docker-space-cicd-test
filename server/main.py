@@ -273,3 +273,6 @@ def completion(request: GenerateRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Completion error: {str(e)}")
+
+
+#푸쉬용 임시 주석
