@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-클라우드 Embedding 엔드포인트 테스트 스크립트
-허깅페이스 Spaces의 embedding 엔드포인트를 테스트합니다.
+Docker 컨테이너 테스트 스크립트
+로컬 Docker 컨테이너의 embedding 엔드포인트를 테스트합니다.
 """
 import json
 import sys
@@ -16,13 +16,12 @@ if sys.stdout.encoding != 'utf-8':
     except:
         pass
 
-# 클라우드 URL (허깅페이스 Spaces)
-CLOUD_URL = "https://jacedashs-test.hf.space"
+DOCKER_URL = "http://localhost:7860"
 
 # 고정 답변을 얻을 수 있는 명확한 프롬프트
 FIXED_PROMPT = "What is 2+2? Answer with only the number."
 
-def test_embedding_endpoint(url: str = CLOUD_URL, input_text: str = FIXED_PROMPT):
+def test_embedding_endpoint(url: str = DOCKER_URL, input_text: str = FIXED_PROMPT):
     """Embedding 엔드포인트 테스트"""
     print(f"Input text: {input_text}")
     print("-" * 60)
@@ -34,7 +33,7 @@ def test_embedding_endpoint(url: str = CLOUD_URL, input_text: str = FIXED_PROMPT
             f"{url}/embedding",
             headers={"Content-Type": "application/json"},
             json={"input_text": input_text},
-            timeout=600  # 클라우드는 시간이 더 걸릴 수 있으므로 타임아웃 증가
+            timeout=120  # 임베딩 추출은 시간이 걸릴 수 있음
         )
         elapsed_time = time.time() - start_time
         
@@ -100,11 +99,12 @@ def test_embedding_endpoint(url: str = CLOUD_URL, input_text: str = FIXED_PROMPT
             if status_code == 404:
                 print("\n  ⚠ 404 에러: /embedding 엔드포인트를 찾을 수 없습니다.")
                 print("  가능한 원인:")
-                print("    1. 클라우드 서버가 최신 코드로 배포되지 않았습니다.")
+                print("    1. 컨테이너가 최신 코드로 빌드되지 않았습니다.")
                 print("    2. 서버 코드에 /embedding 엔드포인트가 없습니다.")
                 print("\n  해결 방법:")
-                print("    GitHub에 코드를 푸시하여 자동 배포를 트리거하세요.")
-                print("    또는 허깅페이스 Spaces에서 수동으로 재배포하세요.")
+                print("    npm run docker:stop")
+                print("    npm run docker:build:run")
+                print("    python test_docker.py")
         return False
     except Exception as e:
         print(f"✗ 예상치 못한 오류: {e}")
@@ -114,33 +114,19 @@ def test_embedding_endpoint(url: str = CLOUD_URL, input_text: str = FIXED_PROMPT
 
 def main():
     """메인 테스트 함수"""
-    import os
-    
     print("\n" + "=" * 60)
-    print("클라우드 Embedding 엔드포인트 테스트")
+    print("Docker 컨테이너 Embedding 엔드포인트 테스트")
     print("=" * 60)
-    
-    # URL 설정 (환경변수 또는 기본값)
-    url = os.getenv("EMBEDDING_URL", CLOUD_URL)
-    # URL에서 /embedding 제거 (함수 내에서 추가됨)
-    if url.endswith("/embedding"):
-        url = url[:-9]
-    
-    print(f"테스트 URL: {url}")
-    print("\n참고: 허깅페이스 Spaces에 배포된 서버를 테스트합니다.")
+    print(f"테스트 URL: {DOCKER_URL}")
+    print("\n참고: 컨테이너가 실행 중이어야 합니다.")
+    print("      실행: npm run docker:build:run")
     print()
     
     # 명령줄 인자로 input_text를 받을 수 있음 (기본값은 FIXED_PROMPT)
     input_text = sys.argv[1] if len(sys.argv) > 1 else FIXED_PROMPT
     
-    # 두 번째 인자로 URL을 지정할 수도 있음
-    if len(sys.argv) > 2:
-        url = sys.argv[2]
-        if url.endswith("/embedding"):
-            url = url[:-9]
-    
     # Embedding 엔드포인트 테스트
-    embedding_ok = test_embedding_endpoint(url=url, input_text=input_text)
+    embedding_ok = test_embedding_endpoint(input_text=input_text)
     
     # 결과 요약
     print("\n" + "=" * 60)

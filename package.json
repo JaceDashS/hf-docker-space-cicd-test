@@ -18,6 +18,9 @@
     "test:embedding": "python test_embedding.py",
     "test:embedding:local": "set EMBEDDING_URL=http://localhost:7860/embedding && python test_embedding.py",
     "test:embedding:hf": "python test_embedding.py",
+    "test:docker": "python test_docker.py",
+    "test:docker:custom": "python test_docker.py",
+    "test:threads": "python test_docker.py threads",
     "deploy:info": "echo 'Deploy to Hugging Face Spaces via GitHub Actions or manually push to HF Space repo'"
   },
   "keywords": [

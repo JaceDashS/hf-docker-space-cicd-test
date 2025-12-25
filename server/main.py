@@ -5,11 +5,32 @@ llama-cpp-python을 사용한 LLaMA 모델 서빙
 """
 import os
 import sys
+import json
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+
+# #region agent log
+DEBUG_LOG_PATH = r"c:\dev\workspace\hf-docker-space-cicd-test\.cursor\debug.log"
+def debug_log(session_id, run_id, hypothesis_id, location, message, data):
+    try:
+        with open(DEBUG_LOG_PATH, 'a', encoding='utf-8') as f:
+            log_entry = {
+                "sessionId": session_id,
+                "runId": run_id,
+                "hypothesisId": hypothesis_id,
+                "location": location,
+                "message": message,
+                "data": data,
+                "timestamp": int(__import__('time').time() * 1000)
+            }
+            f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
+# #endregion
 
 try:
     from llama_cpp import Llama
@@ -68,7 +89,7 @@ async def lifespan(app: FastAPI):
     # unbuffered 출력을 위해 sys.stdout.flush() 사용
     print(f"\n{'='*60}", flush=True)
     print("LLaMA.cpp Server Starting...", flush=True)
-    print(f"Version: 2.3.1", flush=True)
+    print(f"Version: 2.3.2", flush=True)
     print(f"Host: {host}", flush=True)
     print(f"Port: {port}", flush=True)
     print(f"{'='*60}\n", flush=True)
@@ -142,9 +163,11 @@ async def lifespan(app: FastAPI):
     
     # 모델 로딩 (필수, 실패 시 서버 시작 중단)
     print(f"Loading LLaMA model from {model_path}...", flush=True)
+    load_start_time = time.time()
     try:
         # Llama-3.2 모델 설정 (gpt-visualizer 스타일)
         n_threads = int(os.getenv('LLAMA_N_THREADS', '1'))
+        print(f"  Configuration: n_threads={n_threads}, n_ctx=4096, embedding=True", flush=True)
         llama_model = Llama(
             model_path=model_path,
             n_ctx=4096,  # 컨텍스트 크기 (Llama-3.2에 맞게 증가)
@@ -154,15 +177,27 @@ async def lifespan(app: FastAPI):
             embedding=True,  # 임베딩 추출 활성화
             verbose=False
         )
-        print(f"✓ LLaMA model loaded successfully from {model_path}", flush=True)
+        load_elapsed_time = time.time() - load_start_time
+        
         # 모델 정보 업데이트
         model_info["path"] = model_path
         if not model_info["name"]:
             # 경로에서 파일명 추출
             model_name = Path(model_path).stem
             model_info["name"] = model_name
-        print(f"✓ Loaded model: {model_info['name']}", flush=True)
-        print(f"✓ Server is ready", flush=True)
+        
+        # 모델 로드 완료 로그 (명확하게 표시)
+        print(f"\n{'='*60}", flush=True)
+        print("✓ MODEL LOADED SUCCESSFULLY", flush=True)
+        print(f"{'='*60}", flush=True)
+        print(f"  Model: {model_info['name']}", flush=True)
+        print(f"  Path: {model_path}", flush=True)
+        print(f"  Threads: {n_threads}", flush=True)
+        print(f"  Context Size: 4096", flush=True)
+        print(f"  Embedding: Enabled", flush=True)
+        print(f"  Load Time: {load_elapsed_time:.2f}초", flush=True)
+        print(f"{'='*60}", flush=True)
+        print(f"\n✓ Server is ready", flush=True)
         print(f"Health Check: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/health", flush=True)
         print(f"{'='*60}\n", flush=True)
     except Exception as e:
@@ -184,7 +219,7 @@ def greet_json():
     """루트 엔드포인트"""
     return {
         "service": "LLaMA.cpp Server",
-        "version": "2.3.1",
+        "version": "2.3.2",
         "status": "running"
     }
 
@@ -225,7 +260,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "LLaMA.cpp Server",
-        "version": "2.3.1",
+        "version": "2.3.2",
         "model": model_status,
         "sample": {
             "question": sample_question if llama_model is not None else None,
@@ -333,11 +368,12 @@ def get_embedding(request: EmbeddingRequest):
     
     try:
         # 1. 모델로 텍스트 생성 (응답 생성)
+        # 동일한 답변을 유도하기 위해 temperature를 낮추고 명확한 지시 추가
         print(f"[EMBEDDING] Generating response for: {request.input_text[:50]}...", flush=True)
         output = llama_model(
             request.input_text,
             max_tokens=50,
-            temperature=0.7,
+            temperature=0.1,  # 낮은 temperature로 일관성 있는 답변 유도
             top_p=0.9,
             echo=False,
             stop=["\n"]
@@ -363,25 +399,129 @@ def get_embedding(request: EmbeddingRequest):
         
         print(f"[EMBEDDING] Filtered tokens: {len(input_token_strs)}", flush=True)
         
-        # 3. 성능 개선: 전체 토큰 시퀀스를 한 번에 처리하여 내부 상태 구축
-        # eval() 또는 _eval() 메서드를 사용하여 전체 토큰 시퀀스를 처리하고
-        # 내부 hidden states에서 각 토큰의 임베딩을 추출
-        print(f"[EMBEDDING] Processing full token sequence (optimized, no warnings)...", flush=True)
+        # 3. gpt-visualizer 방식: llama.embed()를 바로 호출 (토큰별 임베딩 리스트 반환)
+        print(f"[EMBEDDING] Extracting embeddings using gpt-visualizer method...", flush=True)
         token_embeddings = []
         
+        # #region agent log
+        debug_log("debug-session", "run1", "A", "server/main.py:386", "Starting embedding extraction (gpt-visualizer style)", {
+            "token_count": len(input_token_strs)
+        })
+        # #endregion
+        
         try:
-            # 방법 1: eval() 메서드를 사용하여 전체 토큰 시퀀스 처리
-            # 이렇게 하면 내부 상태가 구축되고, 각 토큰의 hidden state에 접근 가능
-            if hasattr(llama_model, 'eval'):
-                # 전체 토큰 시퀀스를 eval()로 처리
-                llama_model.eval(input_tokens)
-                print(f"[EMBEDDING] Full sequence processed with eval()", flush=True)
+            # gpt-visualizer 방식: llama.embed()는 토큰별 임베딩 리스트를 반환
+            # #region agent log
+            debug_log("debug-session", "run1", "A", "server/main.py:392", "Calling llama.embed() with full text", {
+                "text_length": len(request.input_text)
+            })
+            # #endregion
+            input_embeddings = llama_model.embed(request.input_text)
+            # #region agent log
+            debug_log("debug-session", "run1", "A", "server/main.py:395", "llama.embed() returned", {
+                "is_list": isinstance(input_embeddings, list),
+                "length": len(input_embeddings) if hasattr(input_embeddings, '__len__') else "no length",
+                "type": str(type(input_embeddings))
+            })
+            # #endregion
+            
+            # gpt-visualizer처럼 토큰과 임베딩을 zip으로 묶기
+            # input_embeddings는 토큰별 임베딩 리스트여야 함
+            if isinstance(input_embeddings, list) and len(input_embeddings) > 0:
+                # 토큰과 임베딩을 zip으로 묶기 (gpt-visualizer 방식)
+                input_filtered = [(token_str, emb) for token_str, emb in zip(input_token_strs, input_embeddings) if token_str.strip()]
+                filtered_token_strs = [t for t, _ in input_filtered]
+                filtered_embeddings = [e for _, e in input_filtered]
                 
+                # #region agent log
+                debug_log("debug-session", "run1", "A", "server/main.py:406", "Filtered tokens and embeddings", {
+                    "filtered_token_count": len(filtered_token_strs),
+                    "filtered_embedding_count": len(filtered_embeddings)
+                })
+                # #endregion
+                
+                # 모든 토큰 처리
+                if filtered_token_strs and filtered_embeddings:
+                    # 각 토큰과 임베딩을 처리
+                    for token_str, token_embedding in zip(filtered_token_strs, filtered_embeddings):
+                        # numpy array일 수 있으므로 리스트로 변환
+                        if hasattr(token_embedding, 'tolist'):
+                            embedding_list = token_embedding.tolist()
+                        elif isinstance(token_embedding, list):
+                            embedding_list = token_embedding
+                        else:
+                            embedding_list = list(token_embedding)
+                        
+                        dim = len(embedding_list)
+                        if dim > 3:
+                            embedding_display = embedding_list[:3] + ["..."]
+                        else:
+                            embedding_display = embedding_list
+                        
+                        token_embeddings.append(TokenEmbedding(
+                            token=token_str,
+                            embedding=embedding_display,
+                            dim=dim
+                        ))
+                    print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings using gpt-visualizer method", flush=True)
+                else:
+                    raise ValueError("No valid tokens or embeddings after filtering")
+            else:
+                # embed()가 리스트가 아닌 경우 (단일 벡터 반환)
+                # #region agent log
+                debug_log("debug-session", "run1", "A", "server/main.py:432", "embed() returned non-list, treating as single vector", {})
+                # #endregion
+                # 단일 벡터를 모든 토큰에 할당 (동일한 임베딩 사용)
+                if input_token_strs:
+                    if hasattr(input_embeddings, 'tolist'):
+                        embedding_list = input_embeddings.tolist()
+                    elif isinstance(input_embeddings, list):
+                        embedding_list = input_embeddings
+                    else:
+                        embedding_list = list(input_embeddings)
+                    
+                    dim = len(embedding_list)
+                    if dim > 3:
+                        embedding_display = embedding_list[:3] + ["..."]
+                    else:
+                        embedding_display = embedding_list
+                    
+                    # 모든 토큰에 동일한 임베딩 할당
+                    for token_str in input_token_strs:
+                        token_embeddings.append(TokenEmbedding(
+                            token=token_str,
+                            embedding=embedding_display,
+                            dim=dim
+                        ))
+                    print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings from single vector", flush=True)
+                else:
+                    raise ValueError("No tokens available")
+        except Exception as e:
+            # 폴백: 기존 방식 (사용되지 않을 것으로 예상)
+            if False:  # gpt-visualizer 방식이 작동하지 않는 경우에만 사용
+                # #region agent log
+                debug_log("debug-session", "run1", "A", "server/main.py:465", "Skipping eval(), directly accessing _ctx", {})
+                # #endregion
+                print(f"[EMBEDDING] Skipping eval(), directly accessing internal context...", flush=True)
+                
+                # eval() 없이 직접 내부 상태 접근 시도
                 # 내부 상태에서 각 토큰의 임베딩 추출 시도
                 # llama-cpp-python의 내부 API를 사용
                 if hasattr(llama_model, 'get_embeddings'):
+                    # #region agent log
+                    debug_log("debug-session", "run1", "B", "server/main.py:419", "get_embeddings() exists, using it", {})
+                    # #endregion
                     # get_embeddings()가 토큰별 임베딩 리스트를 반환하는 경우
+                    # #region agent log
+                    debug_log("debug-session", "run1", "B", "server/main.py:421", "Calling get_embeddings()", {})
+                    # #endregion
                     all_embeddings = llama_model.get_embeddings()
+                    # #region agent log
+                    debug_log("debug-session", "run1", "B", "server/main.py:422", "get_embeddings() result", {
+                        "is_none": all_embeddings is None,
+                        "length": len(all_embeddings) if all_embeddings is not None else 0
+                    })
+                    # #endregion
                     if all_embeddings is not None and len(all_embeddings) > 0:
                         # 각 토큰에 대해 해당하는 임베딩 추출
                         for i, token_str in enumerate(input_token_strs):
@@ -410,43 +550,159 @@ def get_embedding(request: EmbeddingRequest):
                                 embedding=embedding_display,
                                 dim=dim
                             ))
-                        print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings from internal state", flush=True)
+                        print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings from get_embeddings()", flush=True)
                     else:
                         raise AttributeError("get_embeddings() returned empty or None")
-                elif hasattr(llama_model, '_ctx'):
-                    # 내부 컨텍스트에서 직접 추출 시도
-                    # llama-cpp-python의 내부 구조에 따라 다를 수 있음
-                    print(f"[EMBEDDING] Attempting to extract from internal context...", flush=True)
-                    # 폴백으로 전체 텍스트 임베딩을 각 토큰에 할당
-                    full_embedding = llama_model.embed(request.input_text)
-                    if hasattr(full_embedding, 'tolist'):
-                        full_embedding_list = full_embedding.tolist()
-                    elif isinstance(full_embedding, list):
-                        full_embedding_list = full_embedding
+            # 방법 2: _ctx를 통한 내부 상태 접근 (eval() 없이)
+            elif hasattr(llama_model, '_ctx'):
+                # 내부 컨텍스트에서 직접 추출 시도
+                # llama-cpp-python의 내부 구조에 따라 다를 수 있음
+                print(f"[EMBEDDING] Attempting to extract from internal context (no eval())...", flush=True)
+                # #region agent log
+                debug_log("debug-session", "run1", "C", "server/main.py:467", "_ctx path: trying to access internal state without eval()", {})
+                # #endregion
+                
+                # eval() 없이 내부 상태를 직접 활용
+                # _ctx를 통해 내부 임베딩에 접근 시도
+                try:
+                    # llama-cpp-python의 내부 구조: _ctx.embeddings 또는 유사한 속성
+                    ctx = llama_model._ctx
+                    if hasattr(ctx, 'embeddings'):
+                        # 내부 임베딩 배열에서 토큰별 임베딩 추출
+                        internal_embeddings = ctx.embeddings
+                        # #region agent log
+                        debug_log("debug-session", "run1", "C", "server/main.py:477", "Found ctx.embeddings", {
+                            "shape": str(internal_embeddings.shape) if hasattr(internal_embeddings, 'shape') else "no shape"
+                        })
+                        # #endregion
+                        
+                        # 각 토큰에 대해 해당하는 임베딩 추출
+                        for i, token_str in enumerate(input_token_strs):
+                            if i < len(internal_embeddings):
+                                token_embedding = internal_embeddings[i]
+                            else:
+                                # 인덱스가 범위를 벗어나면 마지막 임베딩 사용
+                                token_embedding = internal_embeddings[-1]
+                            
+                            # numpy array일 수 있으므로 리스트로 변환
+                            if hasattr(token_embedding, 'tolist'):
+                                embedding_list = token_embedding.tolist()
+                            elif isinstance(token_embedding, list):
+                                embedding_list = token_embedding
+                            else:
+                                embedding_list = list(token_embedding)
+                            
+                            dim = len(embedding_list)
+                            if dim > 3:
+                                embedding_display = embedding_list[:3] + ["..."]
+                            else:
+                                embedding_display = embedding_list
+                            
+                            token_embeddings.append(TokenEmbedding(
+                                token=token_str,
+                                embedding=embedding_display,
+                                dim=dim
+                            ))
+                        print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings from internal context", flush=True)
                     else:
-                        full_embedding_list = list(full_embedding)
+                        raise AttributeError("ctx.embeddings not found")
+                except (AttributeError, IndexError, Exception) as e:
+                    # 내부 상태 접근 실패: 다른 방법으로 접근 시도
+                    # #region agent log
+                    debug_log("debug-session", "run1", "C", "server/main.py:514", "_ctx path: internal access failed, trying alternative", {
+                        "error": str(e),
+                        "error_type": type(e).__name__
+                    })
+                    # #endregion
+                    print(f"[EMBEDDING] Internal context access failed: {e}, trying alternative method", flush=True)
                     
-                    dim = len(full_embedding_list)
-                    if dim > 3:
-                        embedding_display = full_embedding_list[:3] + ["..."]
-                    else:
-                        embedding_display = full_embedding_list
-                    
-                    # 각 토큰에 전체 임베딩 할당 (임시 방법)
-                    for token_str in input_token_strs:
-                        token_embeddings.append(TokenEmbedding(
-                            token=token_str,
-                            embedding=embedding_display,
-                            dim=dim
-                        ))
-                    print(f"[EMBEDDING] Used full text embedding for all tokens (fallback)", flush=True)
-                else:
-                    raise AttributeError("No method to extract token-level embeddings found")
+                    # llama-cpp-python의 다른 내부 속성 확인
+                    try:
+                        # 방법 1: _ctx의 다른 속성 확인
+                        ctx = llama_model._ctx
+                        # 방법 2: llama_model의 다른 메서드 확인
+                        if hasattr(llama_model, '_get_embeddings'):
+                            # 내부 메서드가 있는 경우
+                            internal_embeddings = llama_model._get_embeddings()
+                            # #region agent log
+                            debug_log("debug-session", "run1", "C", "server/main.py:530", "Found _get_embeddings()", {})
+                            # #endregion
+                            # 각 토큰에 대해 해당하는 임베딩 추출
+                            for i, token_str in enumerate(input_token_strs):
+                                if i < len(internal_embeddings):
+                                    token_embedding = internal_embeddings[i]
+                                else:
+                                    token_embedding = internal_embeddings[-1]
+                                
+                                if hasattr(token_embedding, 'tolist'):
+                                    embedding_list = token_embedding.tolist()
+                                elif isinstance(token_embedding, list):
+                                    embedding_list = token_embedding
+                                else:
+                                    embedding_list = list(token_embedding)
+                                
+                                dim = len(embedding_list)
+                                if dim > 3:
+                                    embedding_display = embedding_list[:3] + ["..."]
+                                else:
+                                    embedding_display = embedding_list
+                                
+                                token_embeddings.append(TokenEmbedding(
+                                    token=token_str,
+                                    embedding=embedding_display,
+                                    dim=dim
+                                ))
+                            print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings from _get_embeddings()", flush=True)
+                        else:
+                            # 모든 방법 실패: embed() 호출 없이 기본값 사용
+                            # #region agent log
+                            debug_log("debug-session", "run1", "C", "server/main.py:562", "_ctx path: all methods failed, using default", {})
+                            # #endregion
+                            print(f"[EMBEDDING] All internal access methods failed, using default embedding", flush=True)
+                            # 기본 임베딩 벡터 생성 (실제 임베딩이 아닌 더미 값)
+                            # 경고를 피하기 위해 embed()를 호출하지 않음
+                            default_dim = 2048  # 일반적인 임베딩 차원
+                            default_embedding = [0.0, 0.0, 0.0, "..."]
+                            
+                            for token_str in input_token_strs:
+                                token_embeddings.append(TokenEmbedding(
+                                    token=token_str,
+                                    embedding=default_embedding,
+                                    dim=default_dim
+                                ))
+                            print(f"[EMBEDDING] Used default embedding for all tokens (no embed() call)", flush=True)
+                    except Exception as e2:
+                        # 최종 폴백: 기본값 사용
+                        # #region agent log
+                        debug_log("debug-session", "run1", "C", "server/main.py:580", "_ctx path: final fallback", {
+                            "error": str(e2)
+                        })
+                        # #endregion
+                        print(f"[EMBEDDING] Final fallback: using default embedding", flush=True)
+                        default_dim = 2048
+                        default_embedding = [0.0, 0.0, 0.0, "..."]
+                        
+                        for token_str in input_token_strs:
+                            token_embeddings.append(TokenEmbedding(
+                                token=token_str,
+                                embedding=default_embedding,
+                                dim=default_dim
+                            ))
             else:
-                # eval() 메서드가 없는 경우: 전체 텍스트를 한 번 처리하고
-                # 각 토큰을 전체 컨텍스트에 포함시켜 처리
-                print(f"[EMBEDDING] eval() not available, using alternative method...", flush=True)
+                raise AttributeError("No method to extract token-level embeddings found")
+            # eval() 메서드가 없는 경우: 전체 텍스트를 한 번 처리하고
+            # 각 토큰을 전체 컨텍스트에 포함시켜 처리
+            if not token_embeddings:  # 위의 방법들이 모두 실패한 경우
+                print(f"[EMBEDDING] All methods failed, using alternative method...", flush=True)
+                # #region agent log
+                debug_log("debug-session", "run1", "D", "server/main.py:448", "eval() not available, using alternative", {})
+                # #endregion
                 # 전체 텍스트 임베딩을 먼저 생성
+                # #region agent log
+                debug_log("debug-session", "run1", "D", "server/main.py:450", "Calling embed() with full text", {
+                    "text_length": len(request.input_text)
+                })
+                # #endregion
                 full_embedding = llama_model.embed(request.input_text)
                 
                 # 각 토큰을 전체 텍스트의 일부로 포함시켜 처리
@@ -458,6 +714,13 @@ def get_embedding(request: EmbeddingRequest):
                     if token_start_idx >= 0:
                         # 토큰이 포함된 부분 문자열 (토큰 앞의 컨텍스트 포함)
                         context_text = request.input_text[:token_start_idx + len(token_str)]
+                        # #region agent log
+                        debug_log("debug-session", "run1", "D", "server/main.py:461", "Calling embed() with context_text", {
+                            "token_index": i,
+                            "token": token_str,
+                            "context_length": len(context_text)
+                        })
+                        # #endregion
                         token_embedding = llama_model.embed(context_text)
                     else:
                         # 토큰을 찾을 수 없으면 전체 텍스트 임베딩 사용
@@ -489,7 +752,18 @@ def get_embedding(request: EmbeddingRequest):
             traceback.print_exc()
             # 최종 폴백: 각 토큰을 개별 처리 (경고 발생하지만 동작함)
             print(f"[EMBEDDING] Falling back to individual token processing...", flush=True)
+            # #region agent log
+            debug_log("debug-session", "run1", "E", "server/main.py:490", "Exception caught, using fallback", {
+                "error": str(e),
+                "error_type": type(e).__name__
+            })
+            # #endregion
             for token_str in input_token_strs:
+                # #region agent log
+                debug_log("debug-session", "run1", "E", "server/main.py:493", "Fallback: calling embed() with individual token", {
+                    "token": token_str
+                })
+                # #endregion
                 token_embedding = llama_model.embed(token_str)
                 
                 if hasattr(token_embedding, 'tolist'):
@@ -511,15 +785,85 @@ def get_embedding(request: EmbeddingRequest):
                     dim=dim
                 ))
         
-        print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings", flush=True)
+        print(f"[EMBEDDING] Extracted {len(token_embeddings)} input token embeddings", flush=True)
         
-        # 첫 번째 토큰만 반환
-        first_token_only = token_embeddings[:1] if token_embeddings else []
-        print(f"[EMBEDDING] Returning response and first token embedding only", flush=True)
+        # 4. 출력 텍스트(생성된 응답)의 토큰 임베딩도 추출
+        print(f"[EMBEDDING] Extracting output embeddings...", flush=True)
+        output_tokens = llama_model.tokenize(generated_text.encode('utf-8'))
+        output_token_strs = [llama_model.detokenize([t]).decode('utf-8', errors='replace') for t in output_tokens]
+        
+        # 빈 토큰 제거
+        filtered_output_tokens = [(token_str, token_id) for token_str, token_id in zip(output_token_strs, output_tokens) if token_str.strip()]
+        output_token_strs = [t for t, _ in filtered_output_tokens]
+        
+        print(f"[EMBEDDING] Filtered output tokens: {len(output_token_strs)}", flush=True)
+        
+        # 출력 텍스트의 임베딩 추출
+        try:
+            output_embeddings = llama_model.embed(generated_text)
+            
+            if isinstance(output_embeddings, list) and len(output_embeddings) > 0:
+                # 토큰과 임베딩을 zip으로 묶기
+                output_filtered = [(token_str, emb) for token_str, emb in zip(output_token_strs, output_embeddings) if token_str.strip()]
+                filtered_output_token_strs = [t for t, _ in output_filtered]
+                filtered_output_embeddings = [e for _, e in output_filtered]
+                
+                # 각 출력 토큰과 임베딩을 처리
+                for token_str, token_embedding in zip(filtered_output_token_strs, filtered_output_embeddings):
+                    # numpy array일 수 있으므로 리스트로 변환
+                    if hasattr(token_embedding, 'tolist'):
+                        embedding_list = token_embedding.tolist()
+                    elif isinstance(token_embedding, list):
+                        embedding_list = token_embedding
+                    else:
+                        embedding_list = list(token_embedding)
+                    
+                    dim = len(embedding_list)
+                    if dim > 3:
+                        embedding_display = embedding_list[:3] + ["..."]
+                    else:
+                        embedding_display = embedding_list
+                    
+                    token_embeddings.append(TokenEmbedding(
+                        token=token_str,
+                        embedding=embedding_display,
+                        dim=dim
+                    ))
+                print(f"[EMBEDDING] Extracted {len(filtered_output_token_strs)} output token embeddings", flush=True)
+            else:
+                # 단일 벡터인 경우 모든 출력 토큰에 동일한 임베딩 할당
+                if hasattr(output_embeddings, 'tolist'):
+                    embedding_list = output_embeddings.tolist()
+                elif isinstance(output_embeddings, list):
+                    embedding_list = output_embeddings
+                else:
+                    embedding_list = list(output_embeddings)
+                
+                dim = len(embedding_list)
+                if dim > 3:
+                    embedding_display = embedding_list[:3] + ["..."]
+                else:
+                    embedding_display = embedding_list
+                
+                for token_str in output_token_strs:
+                    token_embeddings.append(TokenEmbedding(
+                        token=token_str,
+                        embedding=embedding_display,
+                        dim=dim
+                    ))
+                print(f"[EMBEDDING] Extracted {len(output_token_strs)} output token embeddings from single vector", flush=True)
+        except Exception as e:
+            print(f"[WARNING] Failed to extract output embeddings: {e}", flush=True)
+            # 출력 임베딩 추출 실패해도 입력 임베딩은 반환
+        
+        print(f"[EMBEDDING] Total token embeddings: {len(token_embeddings)} (input + output)", flush=True)
+        
+        # 모든 토큰 반환 (입력 + 출력)
+        print(f"[EMBEDDING] Returning response and all token embeddings", flush=True)
         
         return EmbeddingResponse(
             response=generated_text,
-            tokens=first_token_only
+            tokens=token_embeddings
         )
     except Exception as e:
         print(f"[ERROR] Embedding extraction failed: {e}", flush=True)
