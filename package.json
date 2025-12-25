@@ -15,6 +15,9 @@
     "docker:clean": "docker rmi health-check-server",
     "test": "curl http://localhost:7860/health || echo 'Server is not running. Run npm start first.'",
     "health": "curl -s http://localhost:7860/health | python -m json.tool || echo 'Server is not running. Run npm start first.'",
+    "test:embedding": "python test_embedding.py",
+    "test:embedding:local": "set EMBEDDING_URL=http://localhost:7860/embedding && python test_embedding.py",
+    "test:embedding:hf": "python test_embedding.py",
     "deploy:info": "echo 'Deploy to Hugging Face Spaces via GitHub Actions or manually push to HF Space repo'"
   },
   "keywords": [
