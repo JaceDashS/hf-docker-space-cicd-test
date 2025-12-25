@@ -168,15 +168,15 @@ async def lifespan(app: FastAPI):
     print(f"Loading LLaMA model from {model_path}...", flush=True)
     load_start_time = time.time()
     try:
-        # Llama-3.2 모델 설정 (gpt-visualizer 스타일)
+        # Qwen2.5 모델 설정 (gpt-visualizer 스타일)
         n_threads = int(os.getenv('LLAMA_N_THREADS', '1'))
         print(f"  Configuration: n_threads={n_threads}, n_ctx=4096, embedding=True", flush=True)
         llama_model = Llama(
             model_path=model_path,
-            n_ctx=4096,  # 컨텍스트 크기 (Llama-3.2에 맞게 증가)
+            n_ctx=4096,  # 컨텍스트 크기
             n_threads=n_threads,  # 스레드 수 (환경변수로 설정 가능)
             n_gpu_layers=0,  # CPU 전용
-            chat_format="llama-3",  # Llama-3 채팅 포맷
+            chat_format="chatml",  # Qwen2.5 채팅 포맷
             embedding=True,  # 임베딩 추출 활성화
             verbose=False
         )
