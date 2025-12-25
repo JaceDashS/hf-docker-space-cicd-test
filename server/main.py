@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     # unbuffered 출력을 위해 sys.stdout.flush() 사용
     print(f"\n{'='*60}", flush=True)
     print("LLaMA.cpp Server Starting...", flush=True)
-    print(f"Version: 2.3.0", flush=True)
+    print(f"Version: 2.3.1", flush=True)
     print(f"Host: {host}", flush=True)
     print(f"Port: {port}", flush=True)
     print(f"{'='*60}\n", flush=True)
@@ -184,7 +184,7 @@ def greet_json():
     """루트 엔드포인트"""
     return {
         "service": "LLaMA.cpp Server",
-        "version": "2.3.0",
+        "version": "2.3.1",
         "status": "running"
     }
 
@@ -225,7 +225,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "LLaMA.cpp Server",
-        "version": "2.3.0",
+        "version": "2.3.1",
         "model": model_status,
         "sample": {
             "question": sample_question if llama_model is not None else None,
@@ -513,9 +513,13 @@ def get_embedding(request: EmbeddingRequest):
         
         print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings", flush=True)
         
+        # 첫 번째 토큰만 반환
+        first_token_only = token_embeddings[:1] if token_embeddings else []
+        print(f"[EMBEDDING] Returning response and first token embedding only", flush=True)
+        
         return EmbeddingResponse(
             response=generated_text,
-            tokens=token_embeddings
+            tokens=first_token_only
         )
     except Exception as e:
         print(f"[ERROR] Embedding extraction failed: {e}", flush=True)
