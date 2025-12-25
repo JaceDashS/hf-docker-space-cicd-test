@@ -57,11 +57,11 @@ async def lifespan(app: FastAPI):
     hf_model_id = os.getenv('HF_MODEL_ID', None)
     hf_filename = os.getenv('HF_FILENAME', None)  # 선택적, GGUF 파일명 지정
     
-    # 환경변수가 없으면 기본 테스트 모델 사용
+    # 환경변수가 없으면 기본 모델 사용 (Llama-3.2-1B-Instruct)
     if not model_path and not hf_model_id:
-        print("ℹ No MODEL_PATH or HF_MODEL_ID specified, using default test model", flush=True)
-        hf_model_id = "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
-        hf_filename = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+        print("ℹ No MODEL_PATH or HF_MODEL_ID specified, using default model", flush=True)
+        hf_model_id = "bartowski/Llama-3.2-1B-Instruct-GGUF"
+        hf_filename = "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
         print(f"  Default model: {hf_model_id}/{hf_filename}", flush=True)
     
     # Hugging Face Hub에서 모델 다운로드
@@ -71,9 +71,12 @@ async def lifespan(app: FastAPI):
             print(f"✗ {error_msg}", flush=True)
             raise ImportError(error_msg)
         
-        # HF_FILENAME이 없으면 기본값 사용 (TinyLlama 작은 버전)
+        # HF_FILENAME이 없으면 기본값 사용
         if not hf_filename:
-            if "tinyllama" in hf_model_id.lower():
+            if "llama-3.2-1b-instruct" in hf_model_id.lower():
+                hf_filename = "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+                print(f"  Using default filename: {hf_filename}", flush=True)
+            elif "tinyllama" in hf_model_id.lower():
                 hf_filename = "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
                 print(f"  Using default filename: {hf_filename}", flush=True)
             else:
@@ -111,10 +114,15 @@ async def lifespan(app: FastAPI):
     # 모델 로딩 (필수, 실패 시 서버 시작 중단)
     print(f"Loading LLaMA model from {model_path}...", flush=True)
     try:
+        # Llama-3.2 모델 설정 (gpt-visualizer 스타일)
+        n_threads = int(os.getenv('LLAMA_N_THREADS', '1'))
         llama_model = Llama(
             model_path=model_path,
-            n_ctx=512,  # 컨텍스트 크기
-            n_threads=4,  # 스레드 수
+            n_ctx=4096,  # 컨텍스트 크기 (Llama-3.2에 맞게 증가)
+            n_threads=n_threads,  # 스레드 수 (환경변수로 설정 가능)
+            n_gpu_layers=0,  # CPU 전용
+            chat_format="llama-3",  # Llama-3 채팅 포맷
+            embedding=True,  # 임베딩 추출 활성화
             verbose=False
         )
         print(f"✓ LLaMA model loaded successfully from {model_path}", flush=True)
