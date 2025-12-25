@@ -1,10 +1,15 @@
 # Read the doc: https://huggingface.co/docs/hub/spaces-sdks-docker
 # you will also find guides on how best to write your Dockerfile
 
-# Read the doc: https://huggingface.co/docs/hub/spaces-sdks-docker
-# you will also find guides on how best to write your Dockerfile
+FROM python:3.11-slim
 
-FROM python:3.9
+# llama-cpp-python 빌드에 필요한 의존성 설치
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    cmake \
+    make \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -u 1000 user
 USER user
