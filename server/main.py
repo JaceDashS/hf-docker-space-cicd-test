@@ -529,4 +529,3 @@ def get_embedding(request: EmbeddingRequest):
 
 
 #푸쉬용 임시 주석
-#push test
