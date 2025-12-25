@@ -382,7 +382,8 @@ def get_embedding(request: EmbeddingRequest):
             # 차원 확인
             dim = len(embedding_list)
             
-            # 앞 3개만 표시하고 나머지는 ... 처리
+            # 앞 3개만 추출하고 나머지는 ... 처리
+            # 실제로 반환할 때는 앞 3개 숫자만 포함하고 나머지는 "..." 문자열로 대체
             if dim > 3:
                 embedding_display = embedding_list[:3] + ["..."]
             else:
@@ -390,8 +391,8 @@ def get_embedding(request: EmbeddingRequest):
             
             token_embeddings.append(TokenEmbedding(
                 token=token_str,
-                embedding=embedding_display,
-                dim=dim
+                embedding=embedding_display,  # 앞 3개 + "..." 만 포함
+                dim=dim  # 전체 차원 수는 dim에 저장
             ))
         
         print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings", flush=True)
