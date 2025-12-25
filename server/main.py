@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
     # unbuffered 출력을 위해 sys.stdout.flush() 사용
     print(f"\n{'='*60}", flush=True)
     print("LLaMA.cpp Server Starting...", flush=True)
-    print(f"Version: 2.1.2", flush=True)
+    print(f"Version: 2.2.0", flush=True)
     print(f"Host: {host}", flush=True)
     print(f"Port: {port}", flush=True)
     print(f"{'='*60}\n", flush=True)
@@ -178,7 +178,7 @@ def greet_json():
     """루트 엔드포인트"""
     return {
         "service": "LLaMA.cpp Server",
-        "version": "2.1.2",
+        "version": "2.2.0",
         "status": "running"
     }
 
@@ -219,7 +219,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "LLaMA.cpp Server",
-        "version": "2.1.2",
+        "version": "2.2.0",
         "model": model_status,
         "sample": {
             "question": sample_question if llama_model is not None else None,
