@@ -26,6 +26,12 @@ except ImportError:
 
 # 전역 변수로 모델 저장
 llama_model = None
+model_info = {
+    "name": None,
+    "path": None,
+    "repo_id": None,
+    "filename": None
+}
 
 
 class GenerateRequest(BaseModel):
@@ -38,7 +44,7 @@ class GenerateRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """서버 시작 및 종료 이벤트 처리"""
-    global llama_model
+    global llama_model, model_info
     
     # Startup
     port = int(os.getenv('PORT', '7860'))
@@ -47,7 +53,7 @@ async def lifespan(app: FastAPI):
     # unbuffered 출력을 위해 sys.stdout.flush() 사용
     print(f"\n{'='*60}", flush=True)
     print("LLaMA.cpp Server Starting...", flush=True)
-    print(f"Version: 2.1.0", flush=True)
+    print(f"Version: 2.1.1", flush=True)
     print(f"Host: {host}", flush=True)
     print(f"Port: {port}", flush=True)
     print(f"{'='*60}\n", flush=True)
@@ -63,6 +69,10 @@ async def lifespan(app: FastAPI):
         hf_model_id = "bartowski/Llama-3.2-1B-Instruct-GGUF"
         hf_filename = "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
         print(f"  Default model: {hf_model_id}/{hf_filename}", flush=True)
+    
+    # 모델 정보 저장
+    model_info["repo_id"] = hf_model_id
+    model_info["filename"] = hf_filename
     
     # Hugging Face Hub에서 모델 다운로드
     if hf_model_id:
@@ -94,6 +104,10 @@ async def lifespan(app: FastAPI):
                 cache_dir=cache_dir
             )
             print(f"✓ Model downloaded to: {model_path}", flush=True)
+            model_info["path"] = model_path
+            # 모델 이름 추출 (파일명에서 확장자 제거)
+            if hf_filename:
+                model_info["name"] = hf_filename.replace(".gguf", "")
         except Exception as e:
             error_msg = f"Failed to download model from Hugging Face Hub: {str(e)}"
             print(f"✗ {error_msg}", flush=True)
@@ -126,6 +140,13 @@ async def lifespan(app: FastAPI):
             verbose=False
         )
         print(f"✓ LLaMA model loaded successfully from {model_path}", flush=True)
+        # 모델 정보 업데이트
+        model_info["path"] = model_path
+        if not model_info["name"]:
+            # 경로에서 파일명 추출
+            model_name = Path(model_path).stem
+            model_info["name"] = model_name
+        print(f"✓ Loaded model: {model_info['name']}", flush=True)
         print(f"✓ Server is ready", flush=True)
         print(f"Health Check: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/health", flush=True)
         print(f"{'='*60}\n", flush=True)
@@ -148,7 +169,7 @@ def greet_json():
     """루트 엔드포인트"""
     return {
         "service": "LLaMA.cpp Server",
-        "version": "2.1.0",
+        "version": "2.1.1",
         "status": "running"
     }
 
@@ -157,7 +178,10 @@ def health_check():
     """헬스체크 엔드포인트"""
     model_status = {
         "loaded": llama_model is not None,
-        "type": "llama-cpp-python" if llama_model is not None else None
+        "type": "llama-cpp-python" if llama_model is not None else None,
+        "name": model_info["name"] if llama_model is not None else None,
+        "repo_id": model_info["repo_id"] if llama_model is not None else None,
+        "filename": model_info["filename"] if llama_model is not None else None
     }
     
     # 모델이 로드되어 있으면 간단한 질문에 대한 응답 생성
@@ -186,7 +210,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "LLaMA.cpp Server",
-        "version": "2.1.0",
+        "version": "2.1.1",
         "model": model_status,
         "sample": {
             "question": sample_question if llama_model is not None else None,
