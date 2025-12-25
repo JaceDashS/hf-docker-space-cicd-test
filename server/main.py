@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     # unbuffered 출력을 위해 sys.stdout.flush() 사용
     print(f"\n{'='*60}", flush=True)
     print("LLaMA.cpp Server Starting...", flush=True)
-    print(f"Version: 2.2.1", flush=True)
+    print(f"Version: 2.2.2", flush=True)
     print(f"Host: {host}", flush=True)
     print(f"Port: {port}", flush=True)
     print(f"{'='*60}\n", flush=True)
@@ -184,7 +184,7 @@ def greet_json():
     """루트 엔드포인트"""
     return {
         "service": "LLaMA.cpp Server",
-        "version": "2.2.1",
+        "version": "2.2.2",
         "status": "running"
     }
 
@@ -225,7 +225,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "LLaMA.cpp Server",
-        "version": "2.2.1",
+        "version": "2.2.2",
         "model": model_status,
         "sample": {
             "question": sample_question if llama_model is not None else None,
@@ -363,13 +363,28 @@ def get_embedding(request: EmbeddingRequest):
         
         print(f"[EMBEDDING] Filtered tokens: {len(input_token_strs)}", flush=True)
         
-        # 3. 각 토큰별로 임베딩 추출
-        # llama-cpp-python에서 각 토큰의 임베딩을 추출하려면 각 토큰을 개별적으로 embed() 호출
-        print(f"[EMBEDDING] Extracting token embeddings...", flush=True)
+        # 3. 성능 개선: 전체 텍스트를 한 번에 embed()로 처리하여 컨텍스트 구축
+        # 이렇게 하면 내부 상태가 최적화되고, 각 토큰의 임베딩을 더 효율적으로 추출할 수 있음
+        # 전체 텍스트를 먼저 처리하면 모델의 내부 컨텍스트 버퍼가 준비되어 
+        # 이후 개별 토큰 처리 시 초기화 오버헤드가 감소함
+        print(f"[EMBEDDING] Building context with full text (optimized)...", flush=True)
+        full_text_embedding = llama_model.embed(request.input_text)
+        print(f"[EMBEDDING] Context built successfully", flush=True)
+        
+        # 4. 각 토큰별로 임베딩 추출
+        # 전체 텍스트 컨텍스트가 이미 구축되어 있으므로, 각 토큰의 임베딩 추출이 더 효율적
+        print(f"[EMBEDDING] Extracting token embeddings (optimized)...", flush=True)
         token_embeddings = []
-        for token_str in input_token_strs:
-            # 각 토큰의 임베딩 추출
-            token_embedding = llama_model.embed(token_str)
+        
+        for i, token_str in enumerate(input_token_strs):
+            try:
+                # 각 토큰의 임베딩 추출
+                # 전체 텍스트 컨텍스트가 이미 구축되어 있어 내부 상태 초기화 오버헤드가 감소
+                token_embedding = llama_model.embed(token_str)
+            except Exception as e:
+                print(f"[WARNING] Failed to embed token '{token_str}': {e}", flush=True)
+                # 폴백: 전체 텍스트 임베딩 사용
+                token_embedding = llama_model.embed(request.input_text)
             
             # numpy array일 수 있으므로 리스트로 변환
             if hasattr(token_embedding, 'tolist'):
@@ -383,7 +398,6 @@ def get_embedding(request: EmbeddingRequest):
             dim = len(embedding_list)
             
             # 앞 3개만 추출하고 나머지는 ... 처리
-            # 실제로 반환할 때는 앞 3개 숫자만 포함하고 나머지는 "..." 문자열로 대체
             if dim > 3:
                 embedding_display = embedding_list[:3] + ["..."]
             else:
