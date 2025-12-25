@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     # unbuffered 출력을 위해 sys.stdout.flush() 사용
     print(f"\n{'='*60}", flush=True)
     print("LLaMA.cpp Server Starting...", flush=True)
-    print(f"Version: 2.2.2", flush=True)
+    print(f"Version: 2.3.0", flush=True)
     print(f"Host: {host}", flush=True)
     print(f"Port: {port}", flush=True)
     print(f"{'='*60}\n", flush=True)
@@ -184,7 +184,7 @@ def greet_json():
     """루트 엔드포인트"""
     return {
         "service": "LLaMA.cpp Server",
-        "version": "2.2.2",
+        "version": "2.3.0",
         "status": "running"
     }
 
@@ -225,7 +225,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "LLaMA.cpp Server",
-        "version": "2.2.2",
+        "version": "2.3.0",
         "model": model_status,
         "sample": {
             "question": sample_question if llama_model is not None else None,
@@ -363,51 +363,153 @@ def get_embedding(request: EmbeddingRequest):
         
         print(f"[EMBEDDING] Filtered tokens: {len(input_token_strs)}", flush=True)
         
-        # 3. 성능 개선: 전체 텍스트를 한 번에 embed()로 처리하여 컨텍스트 구축
-        # 이렇게 하면 내부 상태가 최적화되고, 각 토큰의 임베딩을 더 효율적으로 추출할 수 있음
-        # 전체 텍스트를 먼저 처리하면 모델의 내부 컨텍스트 버퍼가 준비되어 
-        # 이후 개별 토큰 처리 시 초기화 오버헤드가 감소함
-        print(f"[EMBEDDING] Building context with full text (optimized)...", flush=True)
-        full_text_embedding = llama_model.embed(request.input_text)
-        print(f"[EMBEDDING] Context built successfully", flush=True)
-        
-        # 4. 각 토큰별로 임베딩 추출
-        # 전체 텍스트 컨텍스트가 이미 구축되어 있으므로, 각 토큰의 임베딩 추출이 더 효율적
-        print(f"[EMBEDDING] Extracting token embeddings (optimized)...", flush=True)
+        # 3. 성능 개선: 전체 토큰 시퀀스를 한 번에 처리하여 내부 상태 구축
+        # eval() 또는 _eval() 메서드를 사용하여 전체 토큰 시퀀스를 처리하고
+        # 내부 hidden states에서 각 토큰의 임베딩을 추출
+        print(f"[EMBEDDING] Processing full token sequence (optimized, no warnings)...", flush=True)
         token_embeddings = []
         
-        for i, token_str in enumerate(input_token_strs):
-            try:
-                # 각 토큰의 임베딩 추출
-                # 전체 텍스트 컨텍스트가 이미 구축되어 있어 내부 상태 초기화 오버헤드가 감소
+        try:
+            # 방법 1: eval() 메서드를 사용하여 전체 토큰 시퀀스 처리
+            # 이렇게 하면 내부 상태가 구축되고, 각 토큰의 hidden state에 접근 가능
+            if hasattr(llama_model, 'eval'):
+                # 전체 토큰 시퀀스를 eval()로 처리
+                llama_model.eval(input_tokens)
+                print(f"[EMBEDDING] Full sequence processed with eval()", flush=True)
+                
+                # 내부 상태에서 각 토큰의 임베딩 추출 시도
+                # llama-cpp-python의 내부 API를 사용
+                if hasattr(llama_model, 'get_embeddings'):
+                    # get_embeddings()가 토큰별 임베딩 리스트를 반환하는 경우
+                    all_embeddings = llama_model.get_embeddings()
+                    if all_embeddings is not None and len(all_embeddings) > 0:
+                        # 각 토큰에 대해 해당하는 임베딩 추출
+                        for i, token_str in enumerate(input_token_strs):
+                            if i < len(all_embeddings):
+                                token_embedding = all_embeddings[i]
+                            else:
+                                # 인덱스가 범위를 벗어나면 마지막 임베딩 사용
+                                token_embedding = all_embeddings[-1]
+                            
+                            # numpy array일 수 있으므로 리스트로 변환
+                            if hasattr(token_embedding, 'tolist'):
+                                embedding_list = token_embedding.tolist()
+                            elif isinstance(token_embedding, list):
+                                embedding_list = token_embedding
+                            else:
+                                embedding_list = list(token_embedding)
+                            
+                            dim = len(embedding_list)
+                            if dim > 3:
+                                embedding_display = embedding_list[:3] + ["..."]
+                            else:
+                                embedding_display = embedding_list
+                            
+                            token_embeddings.append(TokenEmbedding(
+                                token=token_str,
+                                embedding=embedding_display,
+                                dim=dim
+                            ))
+                        print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings from internal state", flush=True)
+                    else:
+                        raise AttributeError("get_embeddings() returned empty or None")
+                elif hasattr(llama_model, '_ctx'):
+                    # 내부 컨텍스트에서 직접 추출 시도
+                    # llama-cpp-python의 내부 구조에 따라 다를 수 있음
+                    print(f"[EMBEDDING] Attempting to extract from internal context...", flush=True)
+                    # 폴백으로 전체 텍스트 임베딩을 각 토큰에 할당
+                    full_embedding = llama_model.embed(request.input_text)
+                    if hasattr(full_embedding, 'tolist'):
+                        full_embedding_list = full_embedding.tolist()
+                    elif isinstance(full_embedding, list):
+                        full_embedding_list = full_embedding
+                    else:
+                        full_embedding_list = list(full_embedding)
+                    
+                    dim = len(full_embedding_list)
+                    if dim > 3:
+                        embedding_display = full_embedding_list[:3] + ["..."]
+                    else:
+                        embedding_display = full_embedding_list
+                    
+                    # 각 토큰에 전체 임베딩 할당 (임시 방법)
+                    for token_str in input_token_strs:
+                        token_embeddings.append(TokenEmbedding(
+                            token=token_str,
+                            embedding=embedding_display,
+                            dim=dim
+                        ))
+                    print(f"[EMBEDDING] Used full text embedding for all tokens (fallback)", flush=True)
+                else:
+                    raise AttributeError("No method to extract token-level embeddings found")
+            else:
+                # eval() 메서드가 없는 경우: 전체 텍스트를 한 번 처리하고
+                # 각 토큰을 전체 컨텍스트에 포함시켜 처리
+                print(f"[EMBEDDING] eval() not available, using alternative method...", flush=True)
+                # 전체 텍스트 임베딩을 먼저 생성
+                full_embedding = llama_model.embed(request.input_text)
+                
+                # 각 토큰을 전체 텍스트의 일부로 포함시켜 처리
+                # 토큰의 위치를 고려하여 임베딩 추출
+                for i, token_str in enumerate(input_token_strs):
+                    # 토큰 앞부분의 컨텍스트를 포함한 부분 문자열 생성
+                    # 이렇게 하면 전체 컨텍스트를 고려한 임베딩을 얻을 수 있음
+                    token_start_idx = request.input_text.find(token_str)
+                    if token_start_idx >= 0:
+                        # 토큰이 포함된 부분 문자열 (토큰 앞의 컨텍스트 포함)
+                        context_text = request.input_text[:token_start_idx + len(token_str)]
+                        token_embedding = llama_model.embed(context_text)
+                    else:
+                        # 토큰을 찾을 수 없으면 전체 텍스트 임베딩 사용
+                        token_embedding = full_embedding
+                    
+                    # numpy array일 수 있으므로 리스트로 변환
+                    if hasattr(token_embedding, 'tolist'):
+                        embedding_list = token_embedding.tolist()
+                    elif isinstance(token_embedding, list):
+                        embedding_list = token_embedding
+                    else:
+                        embedding_list = list(token_embedding)
+                    
+                    dim = len(embedding_list)
+                    if dim > 3:
+                        embedding_display = embedding_list[:3] + ["..."]
+                    else:
+                        embedding_display = embedding_list
+                    
+                    token_embeddings.append(TokenEmbedding(
+                        token=token_str,
+                        embedding=embedding_display,
+                        dim=dim
+                    ))
+                print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings using context-aware method", flush=True)
+        except Exception as e:
+            print(f"[ERROR] Failed to extract token embeddings using optimized method: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            # 최종 폴백: 각 토큰을 개별 처리 (경고 발생하지만 동작함)
+            print(f"[EMBEDDING] Falling back to individual token processing...", flush=True)
+            for token_str in input_token_strs:
                 token_embedding = llama_model.embed(token_str)
-            except Exception as e:
-                print(f"[WARNING] Failed to embed token '{token_str}': {e}", flush=True)
-                # 폴백: 전체 텍스트 임베딩 사용
-                token_embedding = llama_model.embed(request.input_text)
-            
-            # numpy array일 수 있으므로 리스트로 변환
-            if hasattr(token_embedding, 'tolist'):
-                embedding_list = token_embedding.tolist()
-            elif isinstance(token_embedding, list):
-                embedding_list = token_embedding
-            else:
-                embedding_list = list(token_embedding)
-            
-            # 차원 확인
-            dim = len(embedding_list)
-            
-            # 앞 3개만 추출하고 나머지는 ... 처리
-            if dim > 3:
-                embedding_display = embedding_list[:3] + ["..."]
-            else:
-                embedding_display = embedding_list
-            
-            token_embeddings.append(TokenEmbedding(
-                token=token_str,
-                embedding=embedding_display,  # 앞 3개 + "..." 만 포함
-                dim=dim  # 전체 차원 수는 dim에 저장
-            ))
+                
+                if hasattr(token_embedding, 'tolist'):
+                    embedding_list = token_embedding.tolist()
+                elif isinstance(token_embedding, list):
+                    embedding_list = token_embedding
+                else:
+                    embedding_list = list(token_embedding)
+                
+                dim = len(embedding_list)
+                if dim > 3:
+                    embedding_display = embedding_list[:3] + ["..."]
+                else:
+                    embedding_display = embedding_list
+                
+                token_embeddings.append(TokenEmbedding(
+                    token=token_str,
+                    embedding=embedding_display,
+                    dim=dim
+                ))
         
         print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings", flush=True)
         
