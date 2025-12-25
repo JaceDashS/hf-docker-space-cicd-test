@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
     # unbuffered 출력을 위해 sys.stdout.flush() 사용
     print(f"\n{'='*60}", flush=True)
     print("LLaMA.cpp Server Starting...", flush=True)
-    print(f"Version: 2.3.2", flush=True)
+    print(f"Version: 2.3.3", flush=True)
     print(f"Host: {host}", flush=True)
     print(f"Port: {port}", flush=True)
     print(f"{'='*60}\n", flush=True)
@@ -99,11 +99,11 @@ async def lifespan(app: FastAPI):
     hf_model_id = os.getenv('HF_MODEL_ID', None)
     hf_filename = os.getenv('HF_FILENAME', None)  # 선택적, GGUF 파일명 지정
     
-    # 환경변수가 없으면 기본 모델 사용 (Llama-3.2-1B-Instruct)
+    # 환경변수가 없으면 기본 모델 사용 (Qwen2.5-0.5B-Instruct)
     if not model_path and not hf_model_id:
         print("ℹ No MODEL_PATH or HF_MODEL_ID specified, using default model", flush=True)
-        hf_model_id = "bartowski/Llama-3.2-1B-Instruct-GGUF"
-        hf_filename = "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+        hf_model_id = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+        hf_filename = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
         print(f"  Default model: {hf_model_id}/{hf_filename}", flush=True)
     
     # 모델 정보 저장
@@ -119,7 +119,10 @@ async def lifespan(app: FastAPI):
         
         # HF_FILENAME이 없으면 기본값 사용
         if not hf_filename:
-            if "llama-3.2-1b-instruct" in hf_model_id.lower():
+            if "qwen2.5-0.5b-instruct" in hf_model_id.lower():
+                hf_filename = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+                print(f"  Using default filename: {hf_filename}", flush=True)
+            elif "llama-3.2-1b-instruct" in hf_model_id.lower():
                 hf_filename = "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
                 print(f"  Using default filename: {hf_filename}", flush=True)
             elif "tinyllama" in hf_model_id.lower():
@@ -219,7 +222,7 @@ def greet_json():
     """루트 엔드포인트"""
     return {
         "service": "LLaMA.cpp Server",
-        "version": "2.3.2",
+        "version": "2.3.3",
         "status": "running"
     }
 
@@ -260,7 +263,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "LLaMA.cpp Server",
-        "version": "2.3.2",
+        "version": "2.3.3",
         "model": model_status,
         "sample": {
             "question": sample_question if llama_model is not None else None,
