@@ -166,7 +166,7 @@ async def lifespan(app: FastAPI):
     load_start_time = time.time()
     try:
         # Llama-3.2 모델 설정 (gpt-visualizer 스타일)
-        n_threads = int(os.getenv('LLAMA_N_THREADS', '2'))
+        n_threads = int(os.getenv('LLAMA_N_THREADS', '3'))
         print(f"  Configuration: n_threads={n_threads}, n_ctx=4096, embedding=True", flush=True)
         llama_model = Llama(
             model_path=model_path,
