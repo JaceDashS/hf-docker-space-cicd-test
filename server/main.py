@@ -41,6 +41,15 @@ class GenerateRequest(BaseModel):
     top_p: Optional[float] = 0.9
 
 
+class EmbeddingRequest(BaseModel):
+    input_text: str
+
+
+class EmbeddingResponse(BaseModel):
+    embedding: list  # 앞 5개만 표시, 나머지는 ...
+    dim: int
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """서버 시작 및 종료 이벤트 처리"""
@@ -53,7 +62,7 @@ async def lifespan(app: FastAPI):
     # unbuffered 출력을 위해 sys.stdout.flush() 사용
     print(f"\n{'='*60}", flush=True)
     print("LLaMA.cpp Server Starting...", flush=True)
-    print(f"Version: 2.1.1", flush=True)
+    print(f"Version: 2.1.2", flush=True)
     print(f"Host: {host}", flush=True)
     print(f"Port: {port}", flush=True)
     print(f"{'='*60}\n", flush=True)
@@ -169,7 +178,7 @@ def greet_json():
     """루트 엔드포인트"""
     return {
         "service": "LLaMA.cpp Server",
-        "version": "2.1.1",
+        "version": "2.1.2",
         "status": "running"
     }
 
@@ -210,7 +219,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "LLaMA.cpp Server",
-        "version": "2.1.1",
+        "version": "2.1.2",
         "model": model_status,
         "sample": {
             "question": sample_question if llama_model is not None else None,
@@ -305,6 +314,48 @@ def completion(request: GenerateRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Completion error: {str(e)}")
+
+
+@app.post("/embedding", response_model=EmbeddingResponse)
+def get_embedding(request: EmbeddingRequest):
+    """임베딩 벡터 추출 엔드포인트"""
+    if llama_model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded. Please wait for model to load.")
+    
+    if not request.input_text or not request.input_text.strip():
+        raise HTTPException(status_code=400, detail="input_text is required and cannot be empty")
+    
+    try:
+        # llama-cpp-python의 embed() 메서드로 임베딩 추출
+        # embed()는 전체 텍스트에 대한 임베딩 벡터를 반환
+        embedding_vector = llama_model.embed(request.input_text)
+        
+        # numpy array일 수 있으므로 리스트로 변환
+        if hasattr(embedding_vector, 'tolist'):
+            embedding_list = embedding_vector.tolist()
+        elif isinstance(embedding_vector, list):
+            embedding_list = embedding_vector
+        else:
+            embedding_list = list(embedding_vector)
+        
+        # 차원 확인
+        dim = len(embedding_list)
+        
+        # 앞 5개만 표시하고 나머지는 ... 처리
+        if dim > 5:
+            embedding_display = embedding_list[:5] + ["..."]
+        else:
+            embedding_display = embedding_list
+        
+        return EmbeddingResponse(
+            embedding=embedding_display,
+            dim=dim
+        )
+    except Exception as e:
+        print(f"[ERROR] Embedding extraction failed: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Embedding extraction error: {str(e)}")
 
 
 #푸쉬용 임시 주석
