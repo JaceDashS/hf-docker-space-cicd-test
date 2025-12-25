@@ -45,9 +45,15 @@ class EmbeddingRequest(BaseModel):
     input_text: str
 
 
-class EmbeddingResponse(BaseModel):
-    embedding: list  # 앞 5개만 표시, 나머지는 ...
+class TokenEmbedding(BaseModel):
+    token: str
+    embedding: list  # 앞 3개만 표시, 나머지는 ...
     dim: int
+
+
+class EmbeddingResponse(BaseModel):
+    response: str  # 모델이 생성한 실제 응답
+    tokens: list[TokenEmbedding]  # 토큰별 임베딩 리스트
 
 
 @asynccontextmanager
@@ -318,7 +324,7 @@ def completion(request: GenerateRequest):
 
 @app.post("/embedding", response_model=EmbeddingResponse)
 def get_embedding(request: EmbeddingRequest):
-    """임베딩 벡터 추출 엔드포인트"""
+    """임베딩 벡터 추출 엔드포인트 - 토큰별 임베딩과 모델 응답 반환"""
     if llama_model is None:
         raise HTTPException(status_code=503, detail="Model not loaded. Please wait for model to load.")
     
@@ -326,30 +332,73 @@ def get_embedding(request: EmbeddingRequest):
         raise HTTPException(status_code=400, detail="input_text is required and cannot be empty")
     
     try:
-        # llama-cpp-python의 embed() 메서드로 임베딩 추출
-        # embed()는 전체 텍스트에 대한 임베딩 벡터를 반환
-        embedding_vector = llama_model.embed(request.input_text)
+        # 1. 모델로 텍스트 생성 (응답 생성)
+        print(f"[EMBEDDING] Generating response for: {request.input_text[:50]}...", flush=True)
+        output = llama_model(
+            request.input_text,
+            max_tokens=50,
+            temperature=0.7,
+            top_p=0.9,
+            echo=False,
+            stop=["\n"]
+        )
         
-        # numpy array일 수 있으므로 리스트로 변환
-        if hasattr(embedding_vector, 'tolist'):
-            embedding_list = embedding_vector.tolist()
-        elif isinstance(embedding_vector, list):
-            embedding_list = embedding_vector
+        # 생성된 응답 텍스트 추출
+        if hasattr(output, 'choices'):
+            generated_text = output.choices[0].text.strip()
         else:
-            embedding_list = list(embedding_vector)
+            generated_text = output['choices'][0]['text'].strip()
         
-        # 차원 확인
-        dim = len(embedding_list)
+        print(f"[EMBEDDING] Generated response: {generated_text[:50]}...", flush=True)
         
-        # 앞 5개만 표시하고 나머지는 ... 처리
-        if dim > 5:
-            embedding_display = embedding_list[:5] + ["..."]
-        else:
-            embedding_display = embedding_list
+        # 2. 입력 텍스트를 토큰화
+        print(f"[EMBEDDING] Tokenizing input text...", flush=True)
+        input_tokens = llama_model.tokenize(request.input_text.encode('utf-8'))
+        input_token_strs = [llama_model.detokenize([t]).decode('utf-8', errors='replace') for t in input_tokens]
+        
+        # 빈 토큰 제거
+        filtered_tokens = [(token_str, token_id) for token_str, token_id in zip(input_token_strs, input_tokens) if token_str.strip()]
+        input_token_strs = [t for t, _ in filtered_tokens]
+        input_token_ids = [tid for _, tid in filtered_tokens]
+        
+        print(f"[EMBEDDING] Filtered tokens: {len(input_token_strs)}", flush=True)
+        
+        # 3. 각 토큰별로 임베딩 추출
+        # llama-cpp-python에서 각 토큰의 임베딩을 추출하려면 각 토큰을 개별적으로 embed() 호출
+        print(f"[EMBEDDING] Extracting token embeddings...", flush=True)
+        token_embeddings = []
+        for token_str in input_token_strs:
+            # 각 토큰의 임베딩 추출
+            token_embedding = llama_model.embed(token_str)
+            
+            # numpy array일 수 있으므로 리스트로 변환
+            if hasattr(token_embedding, 'tolist'):
+                embedding_list = token_embedding.tolist()
+            elif isinstance(token_embedding, list):
+                embedding_list = token_embedding
+            else:
+                embedding_list = list(token_embedding)
+            
+            # 차원 확인
+            dim = len(embedding_list)
+            
+            # 앞 3개만 표시하고 나머지는 ... 처리
+            if dim > 3:
+                embedding_display = embedding_list[:3] + ["..."]
+            else:
+                embedding_display = embedding_list
+            
+            token_embeddings.append(TokenEmbedding(
+                token=token_str,
+                embedding=embedding_display,
+                dim=dim
+            ))
+        
+        print(f"[EMBEDDING] Extracted {len(token_embeddings)} token embeddings", flush=True)
         
         return EmbeddingResponse(
-            embedding=embedding_display,
-            dim=dim
+            response=generated_text,
+            tokens=token_embeddings
         )
     except Exception as e:
         print(f"[ERROR] Embedding extraction failed: {e}", flush=True)
